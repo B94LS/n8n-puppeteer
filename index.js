@@ -15,7 +15,6 @@ async function simulateINGMortgage(operationValue) {
             '--disable-gpu',
             '--disable-web-security',
             '--disable-features=IsolateOrigins,site-per-process',
-            // Optimizaciones adicionales
             '--disable-extensions',
             '--disable-background-networking',
             '--disable-background-timer-throttling',
@@ -34,10 +33,8 @@ async function simulateINGMortgage(operationValue) {
     try {
         const page = await browser.newPage();
         
-        // Optimizar rendimiento
         await page.setRequestInterception(true);
         page.on('request', (request) => {
-            // Bloquear recursos innecesarios
             const blockedResources = ['image', 'stylesheet', 'font', 'media'];
             if (blockedResources.includes(request.resourceType())) {
                 request.abort();
@@ -48,11 +45,10 @@ async function simulateINGMortgage(operationValue) {
 
         await page.setDefaultNavigationTimeout(30000);
         await page.setDefaultTimeout(30000);
-
-        // Configurar viewport mínimo
+        
         await page.setViewport({
-            width: 800,
-            height: 600
+            width: 1200,  // Increased viewport size
+            height: 800
         });
 
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
@@ -60,75 +56,82 @@ async function simulateINGMortgage(operationValue) {
         console.log('Navegando a ING...');
 
         await page.goto('https://www.ing.es/hipotecas', {
-            waitUntil: 'domcontentloaded' // Solo esperar al DOM
+            waitUntil: 'networkidle0'  // Changed to ensure full page load
         });
 
-        console.log('Página cargada, buscando elementos...');
+        console.log('Página cargada, esperando elementos del shadow DOM...');
 
-        // Intentar diferentes estrategias para encontrar el radio button
-        const radioButton = await page.evaluate((value) => {
-            // Intentar diferentes selectores
-            const selectors = [
-                `input[name="operation"][value="${value}"]`,
-                `#ing-radio-${value}`,
-                `input[type="radio"][value="${value}"]`,
-                // Buscar por el contenedor del form
-                `form input[type="radio"][value="${value}"]`,
-                // Buscar por atributos aria
-                `[aria-labelledby^="label-ing-radio-"][value="${value}"]`
-            ];
+        // Wait for the custom element to be present
+        await page.waitForSelector('ing-mortgages-form');
 
-            for (let selector of selectors) {
-                const element = document.querySelector(selector);
-                if (element) return true;
+        // New approach using shadow DOM and custom elements
+        const radioButtonFound = await page.evaluate((value) => {
+            // Helper function to get shadow root
+            function getShadowRoot(element) {
+                return element.shadowRoot;
+            }
+
+            // Get all mortgage forms
+            const mortgageForms = document.querySelectorAll('ing-mortgages-form');
+            
+            for (const form of mortgageForms) {
+                const shadowRoot = getShadowRoot(form);
+                if (!shadowRoot) continue;
+
+                // Look for radio inputs in the shadow DOM
+                const radioInputs = shadowRoot.querySelectorAll('input[type="radio"]');
+                for (const radio of radioInputs) {
+                    if (radio.value === value) {
+                        // Click the radio button
+                        radio.click();
+                        // Also dispatch change event
+                        radio.dispatchEvent(new Event('change', { bubbles: true }));
+                        return true;
+                    }
+                }
             }
             return false;
         }, operationValue);
 
-        if (!radioButton) {
-            throw new Error('No se pudo encontrar el radio button - estructura de página posiblemente cambiada');
+        if (!radioButtonFound) {
+            throw new Error('No se pudo encontrar el radio button en el shadow DOM');
         }
 
-        console.log('Elemento encontrado, realizando click...');
+        console.log('Radio button encontrado y clickeado, buscando botón continuar...');
 
-        // Hacer click usando JavaScript
-        await page.evaluate((value) => {
-            const radio = document.querySelector(`input[value="${value}"]`);
-            if (radio) {
-                radio.click();
-                return true;
+        // Wait a bit for any reactions to the radio button click
+        await page.waitForTimeout(1000);
+
+        // New approach for finding and clicking the continue button
+        const buttonClicked = await page.evaluate(() => {
+            function findButtonInShadowDOM(element) {
+                const shadowRoot = element.shadowRoot;
+                if (!shadowRoot) return null;
+
+                // Look for button in different possible formats
+                const button = shadowRoot.querySelector('button.next-button') ||
+                             shadowRoot.querySelector('ing-button[type="submit"]') ||
+                             shadowRoot.querySelector('[role="button"]');
+
+                if (button) {
+                    button.click();
+                    return true;
+                }
+                return false;
             }
-            return false;
-        }, operationValue);
 
-        console.log('Buscando botón continuar...');
-
-        // Buscar el botón de diferentes formas
-        const continueButton = await page.evaluate(() => {
-            const selectors = [
-                '.next-button',
-                'ing-button[type="submit"]',
-                'button:has-text("Continuar")',
-                '[role="button"]:has-text("Continuar")'
-            ];
-
-            for (let selector of selectors) {
-                const element = document.querySelector(selector);
-                if (element) return true;
+            const forms = document.querySelectorAll('ing-mortgages-form');
+            for (const form of forms) {
+                if (findButtonInShadowDOM(form)) return true;
             }
             return false;
         });
 
-        if (!continueButton) {
-            throw new Error('No se pudo encontrar el botón continuar');
+        if (!buttonClicked) {
+            throw new Error('No se pudo encontrar o hacer click en el botón continuar');
         }
 
-        // Click en continuar usando JavaScript
-        await page.evaluate(() => {
-            const button = document.querySelector('.next-button');
-            if (button) button.click();
-        });
-
+        // Wait for any transitions or loading states
         await page.waitForTimeout(2000);
 
         console.log('Tomando screenshot...');
