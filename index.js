@@ -14,68 +14,128 @@ async function simulateINGMortgage(operationValue) {
             '--disable-dev-shm-usage',
             '--disable-gpu',
             '--disable-web-security',
-            '--disable-features=IsolateOrigins,site-per-process'
-        ],
-        timeout: 60000 // Aumentamos timeout del navegador a 60s
+            '--disable-features=IsolateOrigins,site-per-process',
+            // Optimizaciones adicionales
+            '--disable-extensions',
+            '--disable-background-networking',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-breakpad',
+            '--disable-client-side-phishing-detection',
+            '--disable-component-extensions-with-background-pages',
+            '--disable-default-apps',
+            '--disable-translate',
+            '--metrics-recording-only',
+            '--no-first-run',
+            '--safebrowsing-disable-auto-update'
+        ]
     });
 
     try {
         const page = await browser.newPage();
         
-        // Aumentar timeouts de navegación
-        await page.setDefaultNavigationTimeout(60000);
-        await page.setDefaultTimeout(60000);
-        
-        console.log('Configurando página...');
-        
-        // Configurar viewport para captura
-        await page.setViewport({
-            width: 1280,
-            height: 800
+        // Optimizar rendimiento
+        await page.setRequestInterception(true);
+        page.on('request', (request) => {
+            // Bloquear recursos innecesarios
+            const blockedResources = ['image', 'stylesheet', 'font', 'media'];
+            if (blockedResources.includes(request.resourceType())) {
+                request.abort();
+            } else {
+                request.continue();
+            }
         });
 
-        // Configurar User-Agent
+        await page.setDefaultNavigationTimeout(30000);
+        await page.setDefaultTimeout(30000);
+
+        // Configurar viewport mínimo
+        await page.setViewport({
+            width: 800,
+            height: 600
+        });
+
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-        // Habilitar logs de consola del navegador
-        page.on('console', msg => console.log('Browser console:', msg.text()));
-        
         console.log('Navegando a ING...');
 
-        // Navegar a la página con más opciones de espera
         await page.goto('https://www.ing.es/hipotecas', {
-            waitUntil: ['networkidle0', 'domcontentloaded'],
-            timeout: 60000
+            waitUntil: 'domcontentloaded' // Solo esperar al DOM
         });
 
-        console.log('Página cargada, esperando elementos...');
+        console.log('Página cargada, buscando elementos...');
 
-        // Esperar a que los elementos estén disponibles
-        await page.waitForSelector('input[name="operation"]', { timeout: 60000 });
-        await page.waitForSelector('.next-button', { timeout: 60000 });
+        // Intentar diferentes estrategias para encontrar el radio button
+        const radioButton = await page.evaluate((value) => {
+            // Intentar diferentes selectores
+            const selectors = [
+                `input[name="operation"][value="${value}"]`,
+                `#ing-radio-${value}`,
+                `input[type="radio"][value="${value}"]`,
+                // Buscar por el contenedor del form
+                `form input[type="radio"][value="${value}"]`,
+                // Buscar por atributos aria
+                `[aria-labelledby^="label-ing-radio-"][value="${value}"]`
+            ];
 
-        console.log('Seleccionando opción:', operationValue);
+            for (let selector of selectors) {
+                const element = document.querySelector(selector);
+                if (element) return true;
+            }
+            return false;
+        }, operationValue);
 
-        // Seleccionar la opción de operación
-        await page.click(`input[name="operation"][value="${operationValue}"]`);
+        if (!radioButton) {
+            throw new Error('No se pudo encontrar el radio button - estructura de página posiblemente cambiada');
+        }
 
-        console.log('Haciendo click en continuar...');
+        console.log('Elemento encontrado, realizando click...');
 
-        // Click en el botón continuar
-        await page.click('.next-button');
+        // Hacer click usando JavaScript
+        await page.evaluate((value) => {
+            const radio = document.querySelector(`input[value="${value}"]`);
+            if (radio) {
+                radio.click();
+                return true;
+            }
+            return false;
+        }, operationValue);
 
-        // Esperar a que la página se actualice
-        await page.waitForTimeout(5000); // Aumentamos el tiempo de espera después del click
+        console.log('Buscando botón continuar...');
+
+        // Buscar el botón de diferentes formas
+        const continueButton = await page.evaluate(() => {
+            const selectors = [
+                '.next-button',
+                'ing-button[type="submit"]',
+                'button:has-text("Continuar")',
+                '[role="button"]:has-text("Continuar")'
+            ];
+
+            for (let selector of selectors) {
+                const element = document.querySelector(selector);
+                if (element) return true;
+            }
+            return false;
+        });
+
+        if (!continueButton) {
+            throw new Error('No se pudo encontrar el botón continuar');
+        }
+
+        // Click en continuar usando JavaScript
+        await page.evaluate(() => {
+            const button = document.querySelector('.next-button');
+            if (button) button.click();
+        });
+
+        await page.waitForTimeout(2000);
 
         console.log('Tomando screenshot...');
-
-        // Tomar screenshot
         const screenshot = await page.screenshot({
-            fullPage: true,
+            fullPage: false,
             encoding: 'base64'
         });
-
-        console.log('Proceso completado exitosamente');
 
         return {
             status: 'success',
@@ -83,22 +143,18 @@ async function simulateINGMortgage(operationValue) {
         };
 
     } catch (error) {
-        console.error('Error detallado durante la simulación:', {
+        console.error('Error detallado:', {
             message: error.message,
-            stack: error.stack,
-            name: error.name
+            stack: error.stack
         });
-        throw new Error(`Error en la simulación: ${error.message}`);
+        throw error;
     } finally {
-        if (browser) {
-            await browser.close();
-        }
+        await browser.close();
     }
 }
 
-// Endpoint para iniciar simulación
 app.post('/simulate', async (req, res) => {
-    console.log('Recibida petición de simulación:', req.body);
+    console.log('Recibida petición:', req.body);
     
     try {
         const { operationValue } = req.body;
@@ -113,7 +169,7 @@ app.post('/simulate', async (req, res) => {
         const result = await simulateINGMortgage(operationValue);
         res.json(result);
     } catch (error) {
-        console.error('Error en endpoint simulate:', error);
+        console.error('Error en endpoint:', error);
         res.status(500).json({
             status: 'error',
             message: error.message,
@@ -125,14 +181,10 @@ app.post('/simulate', async (req, res) => {
     }
 });
 
-// Endpoint de salud
 app.get('/health', (req, res) => {
-    res.json({ 
-        status: 'ok',
-        timestamp: new Date().toISOString() 
-    });
+    res.json({ status: 'ok' });
 });
 
 app.listen(port, () => {
-    console.log(`Servidor corriendo en puerto ${port} - ${new Date().toISOString()}`);
+    console.log(`Servidor corriendo en puerto ${port}`);
 });
