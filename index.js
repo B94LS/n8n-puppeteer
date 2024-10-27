@@ -2,11 +2,11 @@ const express = require('express');
 const puppeteer = require('puppeteer');
 
 const app = express();
+// Asegurarnos de usar el puerto de Render
 const port = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// Función para manejar el formulario de ING
 async function completarFormularioING() {
   let browser;
   try {
@@ -21,20 +21,14 @@ async function completarFormularioING() {
     });
 
     const page = await browser.newPage();
-    
-    // Configurar el viewport
     await page.setViewport({ width: 1280, height: 800 });
-
-    // Configurar timeout más largo para entornos de rendimiento variable
     page.setDefaultNavigationTimeout(30000);
     page.setDefaultTimeout(30000);
 
-    // Navegar a la página
     await page.goto('https://www.ing.es/hipotecas', {
       waitUntil: 'networkidle0'
     });
 
-    // Resto del código igual...
     await page.waitForSelector('input[type="radio"]');
 
     const radioButtons = await page.$$('input[type="radio"]');
@@ -72,4 +66,48 @@ async function completarFormularioING() {
   }
 }
 
-// Resto del código igual...
+// Endpoint raíz para verificar que el servicio está en funcionamiento
+app.get('/', (req, res) => {
+  res.json({ status: 'Server is running' });
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'OK' });
+});
+
+// Endpoint para completar el formulario
+app.post('/complete-form', async (req, res) => {
+  try {
+    const result = await completarFormularioING();
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Manejador de errores general
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({
+    success: false,
+    error: 'Error interno del servidor'
+  });
+});
+
+// Iniciar el servidor y loguear cuando esté listo
+const server = app.listen(port, '0.0.0.0', () => {
+  console.log(`Server is running on port ${port}`);
+  console.log(`Health check available at: http://0.0.0.0:${port}/health`);
+});
+
+// Manejar el cierre graceful
+process.on('SIGTERM', () => {
+  console.log('SIGTERM signal received: closing HTTP server');
+  server.close(() => {
+    console.log('HTTP server closed');
+  });
+});
