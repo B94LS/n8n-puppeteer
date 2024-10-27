@@ -2,7 +2,6 @@ const express = require('express');
 const puppeteer = require('puppeteer');
 
 const app = express();
-// Asegurarnos de usar el puerto de Render
 const port = process.env.PORT || 3000;
 
 app.use(express.json());
@@ -10,26 +9,41 @@ app.use(express.json());
 async function completarFormularioING() {
   let browser;
   try {
+    // Configuración actualizada para usar Chrome preinstalado
     browser = await puppeteer.launch({
       headless: 'new',
+      executablePath: '/usr/bin/google-chrome-stable',  // Ruta en la imagen de Puppeteer
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--disable-gpu'
-      ]
+        '--disable-gpu',
+        '--single-process'
+      ],
+      ignoreHTTPSErrors: true
     });
 
     const page = await browser.newPage();
+    
+    // Añadir logging para debug
+    console.log('Navegador iniciado correctamente');
+    
     await page.setViewport({ width: 1280, height: 800 });
-    page.setDefaultNavigationTimeout(30000);
-    page.setDefaultTimeout(30000);
+    page.setDefaultNavigationTimeout(60000); // Aumentamos el timeout a 60 segundos
+    page.setDefaultTimeout(60000);
 
+    // Log de navegación
+    console.log('Intentando navegar a ING...');
+    
     await page.goto('https://www.ing.es/hipotecas', {
-      waitUntil: 'networkidle0'
+      waitUntil: 'networkidle0',
+      timeout: 60000
     });
 
-    await page.waitForSelector('input[type="radio"]');
+    console.log('Página cargada correctamente');
+
+    await page.waitForSelector('input[type="radio"]', { timeout: 60000 });
+    console.log('Selector de radio encontrado');
 
     const radioButtons = await page.$$('input[type="radio"]');
     for (const radioButton of radioButtons) {
@@ -40,13 +54,21 @@ async function completarFormularioING() {
       
       if (labelText.includes('Comprar una casa')) {
         await radioButton.click();
+        console.log('Opción "Comprar una casa" seleccionada');
         break;
       }
     }
 
     await page.waitForTimeout(1000);
+    
+    console.log('Intentando hacer clic en Continuar...');
     await page.click('button:has-text("Continuar")');
-    await page.waitForNavigation({ waitUntil: 'networkidle0' });
+    
+    await page.waitForNavigation({ 
+      waitUntil: 'networkidle0',
+      timeout: 60000 
+    });
+    console.log('Navegación completada');
 
     return {
       success: true,
@@ -54,19 +76,20 @@ async function completarFormularioING() {
     };
 
   } catch (error) {
-    console.error('Error:', error);
+    console.error('Error detallado:', error);
     return {
       success: false,
-      error: error.message
+      error: `${error.message}\nStack: ${error.stack}`
     };
   } finally {
     if (browser) {
       await browser.close();
+      console.log('Navegador cerrado');
     }
   }
 }
 
-// Endpoint raíz para verificar que el servicio está en funcionamiento
+// Endpoint raíz
 app.get('/', (req, res) => {
   res.json({ status: 'Server is running' });
 });
@@ -78,27 +101,32 @@ app.get('/health', (req, res) => {
 
 // Endpoint para completar el formulario
 app.post('/complete-form', async (req, res) => {
+  console.log('Recibida petición para completar formulario');
   try {
     const result = await completarFormularioING();
+    console.log('Resultado:', result);
     res.json(result);
   } catch (error) {
+    console.error('Error en el endpoint:', error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: error.message,
+      stack: error.stack
     });
   }
 });
 
 // Manejador de errores general
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  console.error('Error no manejado:', err.stack);
   res.status(500).json({
     success: false,
-    error: 'Error interno del servidor'
+    error: 'Error interno del servidor',
+    details: err.message
   });
 });
 
-// Iniciar el servidor y loguear cuando esté listo
+// Iniciar el servidor
 const server = app.listen(port, '0.0.0.0', () => {
   console.log(`Server is running on port ${port}`);
   console.log(`Health check available at: http://0.0.0.0:${port}/health`);
