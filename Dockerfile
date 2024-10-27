@@ -1,5 +1,5 @@
-# Usamos una imagen base con Node.js y las dependencias necesarias para Puppeteer
-FROM ghcr.io/puppeteer/puppeteer:21.5.2
+# Actualizamos a la última imagen base estable de Puppeteer
+FROM ghcr.io/puppeteer/puppeteer:22.8.2
 
 # Establecemos el directorio de trabajo
 WORKDIR /usr/src/app
