@@ -1,29 +1,26 @@
-FROM node:18-slim
+# Usar una imagen base más completa que incluye las dependencias necesarias
+FROM ghcr.io/puppeteer/puppeteer:21.5.2
 
-# Instalar dependencias necesarias para Puppeteer
-RUN apt-get update \
-    && apt-get install -y wget gnupg \
-    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/sources.list.d/google.list' \
-    && apt-get update \
-    && apt-get install -y google-chrome-stable fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf libxss1 \
-      --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
+# Establecer el usuario para evitar problemas de permisos
+USER root
 
-# Crear directorio de la aplicación
+# Crear y establecer el directorio de trabajo
 WORKDIR /usr/src/app
 
-# Copiar package.json y package-lock.json
+# Copiar los archivos del proyecto
 COPY package*.json ./
 
 # Instalar dependencias
 RUN npm install
 
-# Copiar el código fuente
+# Copiar el resto del código
 COPY . .
 
-# Exponer el puerto que usa la aplicación
+# Exponer el puerto
 EXPOSE 3000
 
-# Comando para ejecutar la aplicación
+# Cambiar al usuario no root para mayor seguridad
+USER pptruser
+
+# Comando para iniciar la aplicación
 CMD ["npm", "start"]
