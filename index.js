@@ -33,6 +33,11 @@ async function simulateINGMortgage(operationValue) {
     try {
         const page = await browser.newPage();
         
+        // Aumentar timeouts
+        await page.setDefaultNavigationTimeout(60000); // 60 segundos
+        await page.setDefaultTimeout(60000);
+
+        // Optimizar carga de recursos
         await page.setRequestInterception(true);
         page.on('request', (request) => {
             const blockedResources = ['image', 'stylesheet', 'font', 'media'];
@@ -43,95 +48,181 @@ async function simulateINGMortgage(operationValue) {
             }
         });
 
-        await page.setDefaultNavigationTimeout(30000);
-        await page.setDefaultTimeout(30000);
-        
+        // Configurar viewport
         await page.setViewport({
-            width: 1200,  // Increased viewport size
+            width: 1200,
             height: 800
+        });
+
+        // Configurar headers
+        await page.setExtraHTTPHeaders({
+            'Accept-Language': 'es-ES,es;q=0.9',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Connection': 'keep-alive',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache'
         });
 
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
         console.log('Navegando a ING...');
 
-        await page.goto('https://www.ing.es/hipotecas', {
-            waitUntil: 'networkidle0'  // Changed to ensure full page load
-        });
-
-        console.log('Página cargada, esperando elementos del shadow DOM...');
-
-        // Wait for the custom element to be present
-        await page.waitForSelector('ing-mortgages-form');
-
-        // New approach using shadow DOM and custom elements
-        const radioButtonFound = await page.evaluate((value) => {
-            // Helper function to get shadow root
-            function getShadowRoot(element) {
-                return element.shadowRoot;
+        // Implementar retry logic para la navegación
+        let retries = 3;
+        let loaded = false;
+        
+        while (retries > 0 && !loaded) {
+            try {
+                await page.goto('https://www.ing.es/hipotecas', {
+                    waitUntil: ['domcontentloaded', 'networkidle2'],
+                    timeout: 45000
+                });
+                loaded = true;
+            } catch (error) {
+                console.log(`Intento fallido ${4 - retries}/3. Error: ${error.message}`);
+                retries--;
+                if (retries === 0) throw error;
+                await page.waitForTimeout(2000); // Esperar antes de reintentar
             }
+        }
 
-            // Get all mortgage forms
-            const mortgageForms = document.querySelectorAll('ing-mortgages-form');
-            
-            for (const form of mortgageForms) {
-                const shadowRoot = getShadowRoot(form);
-                if (!shadowRoot) continue;
+        console.log('Página cargada, esperando elementos críticos...');
 
-                // Look for radio inputs in the shadow DOM
-                const radioInputs = shadowRoot.querySelectorAll('input[type="radio"]');
-                for (const radio of radioInputs) {
-                    if (radio.value === value) {
-                        // Click the radio button
-                        radio.click();
-                        // Also dispatch change event
-                        radio.dispatchEvent(new Event('change', { bubbles: true }));
-                        return true;
-                    }
+        // Esperar a que aparezcan elementos críticos con retry
+        async function waitForElementWithRetry(selector, maxRetries = 3) {
+            for (let i = 0; i < maxRetries; i++) {
+                try {
+                    await page.waitForSelector(selector, {
+                        timeout: 20000
+                    });
+                    return true;
+                } catch (error) {
+                    if (i === maxRetries - 1) throw error;
+                    await page.waitForTimeout(1000);
                 }
             }
             return false;
+        }
+
+        await waitForElementWithRetry('ing-mortgages-form');
+
+        // Verificar que la página está realmente cargada
+        const isPageLoaded = await page.evaluate(() => {
+            return document.readyState === 'complete' && 
+                   !!document.querySelector('ing-mortgages-form');
+        });
+
+        if (!isPageLoaded) {
+            throw new Error('La página no se cargó completamente');
+        }
+
+        console.log('Elementos críticos encontrados, procediendo con la interacción...');
+
+        // Intentar interactuar con el radio button
+        const radioButtonFound = await page.evaluate((value) => {
+            return new Promise((resolve) => {
+                function attemptInteraction() {
+                    function getShadowRoot(element) {
+                        return element.shadowRoot;
+                    }
+
+                    const mortgageForms = document.querySelectorAll('ing-mortgages-form');
+                    
+                    for (const form of mortgageForms) {
+                        const shadowRoot = getShadowRoot(form);
+                        if (!shadowRoot) continue;
+
+                        const radioInputs = shadowRoot.querySelectorAll('input[type="radio"]');
+                        for (const radio of radioInputs) {
+                            if (radio.value === value) {
+                                radio.click();
+                                radio.dispatchEvent(new Event('change', { bubbles: true }));
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                }
+
+                // Intentar varias veces con un pequeño retraso
+                let attempts = 0;
+                const maxAttempts = 5;
+                
+                function tryClick() {
+                    if (attempts >= maxAttempts) {
+                        resolve(false);
+                        return;
+                    }
+                    
+                    if (attemptInteraction()) {
+                        resolve(true);
+                    } else {
+                        attempts++;
+                        setTimeout(tryClick, 1000);
+                    }
+                }
+
+                tryClick();
+            });
         }, operationValue);
 
         if (!radioButtonFound) {
-            throw new Error('No se pudo encontrar el radio button en el shadow DOM');
+            throw new Error('No se pudo encontrar o interactuar con el radio button en el shadow DOM');
         }
 
-        console.log('Radio button encontrado y clickeado, buscando botón continuar...');
+        await page.waitForTimeout(2000);
 
-        // Wait a bit for any reactions to the radio button click
-        await page.waitForTimeout(1000);
-
-        // New approach for finding and clicking the continue button
+        // Intentar hacer click en el botón continuar
         const buttonClicked = await page.evaluate(() => {
-            function findButtonInShadowDOM(element) {
-                const shadowRoot = element.shadowRoot;
-                if (!shadowRoot) return null;
+            return new Promise((resolve) => {
+                function findAndClickButton() {
+                    function findButtonInShadowDOM(element) {
+                        const shadowRoot = element.shadowRoot;
+                        if (!shadowRoot) return null;
 
-                // Look for button in different possible formats
-                const button = shadowRoot.querySelector('button.next-button') ||
-                             shadowRoot.querySelector('ing-button[type="submit"]') ||
-                             shadowRoot.querySelector('[role="button"]');
+                        const button = shadowRoot.querySelector('button.next-button') ||
+                                     shadowRoot.querySelector('ing-button[type="submit"]') ||
+                                     shadowRoot.querySelector('[role="button"]');
 
-                if (button) {
-                    button.click();
-                    return true;
+                        if (button) {
+                            button.click();
+                            return true;
+                        }
+                        return false;
+                    }
+
+                    const forms = document.querySelectorAll('ing-mortgages-form');
+                    for (const form of forms) {
+                        if (findButtonInShadowDOM(form)) return true;
+                    }
+                    return false;
                 }
-                return false;
-            }
 
-            const forms = document.querySelectorAll('ing-mortgages-form');
-            for (const form of forms) {
-                if (findButtonInShadowDOM(form)) return true;
-            }
-            return false;
+                let attempts = 0;
+                const maxAttempts = 5;
+                
+                function tryClick() {
+                    if (attempts >= maxAttempts) {
+                        resolve(false);
+                        return;
+                    }
+                    
+                    if (findAndClickButton()) {
+                        resolve(true);
+                    } else {
+                        attempts++;
+                        setTimeout(tryClick, 1000);
+                    }
+                }
+
+                tryClick();
+            });
         });
 
         if (!buttonClicked) {
             throw new Error('No se pudo encontrar o hacer click en el botón continuar');
         }
 
-        // Wait for any transitions or loading states
         await page.waitForTimeout(2000);
 
         console.log('Tomando screenshot...');
