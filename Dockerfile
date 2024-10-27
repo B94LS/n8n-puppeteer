@@ -1,5 +1,5 @@
-# Usar una imagen base más completa que incluye las dependencias necesarias
-FROM ghcr.io/puppeteer/puppeteer:21.5.2
+# Usar la última versión estable de la imagen de Puppeteer
+FROM ghcr.io/puppeteer/puppeteer:22.8.2
 
 # Establecer el usuario para evitar problemas de permisos
 USER root
