@@ -1,7 +1,5 @@
-# Usar la última versión estable de la imagen de Puppeteer
 FROM ghcr.io/puppeteer/puppeteer:22.8.2
 
-# Establecer el usuario para evitar problemas de permisos
 USER root
 
 # Crear y establecer el directorio de trabajo
@@ -16,8 +14,12 @@ RUN npm install
 # Copiar el resto del código
 COPY . .
 
-# Exponer el puerto
+# Asegurarnos de que el puerto 3000 está expuesto
 EXPOSE 3000
+
+# Establecer las variables de entorno
+ENV PORT=3000
+ENV HOST=0.0.0.0
 
 # Cambiar al usuario no root para mayor seguridad
 USER pptruser
