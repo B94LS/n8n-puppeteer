@@ -1,36 +1,20 @@
-FROM ghcr.io/puppeteer/puppeteer:22.8.2
+# Usamos una imagen base con Node.js y las dependencias necesarias para Puppeteer
+FROM ghcr.io/puppeteer/puppeteer:21.5.2
 
-USER root
-
-# Verificar que Chrome está instalado y mostrar su versión
-RUN google-chrome-stable --version
-
+# Establecemos el directorio de trabajo
 WORKDIR /usr/src/app
 
-# Copiar los archivos del proyecto
+# Copiamos package.json y package-lock.json
 COPY package*.json ./
 
-# Instalar dependencias
+# Instalamos dependencias
 RUN npm install
 
-# Copiar el resto del código
+# Copiamos el código fuente
 COPY . .
 
-# Asegurarnos de que el puerto 3000 está expuesto
+# Exponemos el puerto que usará la aplicación
 EXPOSE 3000
 
-# Establecer las variables de entorno
-ENV PORT=3000
-ENV HOST=0.0.0.0
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
-
-# Crear y dar permisos al directorio de cache
-RUN mkdir -p /home/pptruser/.cache/puppeteer && \
-    chown -R pptruser:pptruser /home/pptruser/.cache
-
-# Cambiar al usuario no root
-USER pptruser
-
 # Comando para iniciar la aplicación
-CMD ["npm", "start"]
+CMD ["node", "index.js"]
