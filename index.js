@@ -8,29 +8,35 @@ app.use(express.json());
 
 // Función para manejar el formulario de ING
 async function completarFormularioING() {
+  let browser;
   try {
-    const browser = await puppeteer.launch({
+    browser = await puppeteer.launch({
       headless: 'new',
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-gpu'
-      ],
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome'
+      ]
     });
 
     const page = await browser.newPage();
+    
+    // Configurar el viewport
+    await page.setViewport({ width: 1280, height: 800 });
+
+    // Configurar timeout más largo para entornos de rendimiento variable
+    page.setDefaultNavigationTimeout(30000);
+    page.setDefaultTimeout(30000);
 
     // Navegar a la página
     await page.goto('https://www.ing.es/hipotecas', {
       waitUntil: 'networkidle0'
     });
 
-    // Esperar a que aparezca el formulario
+    // Resto del código igual...
     await page.waitForSelector('input[type="radio"]');
 
-    // Seleccionar "Comprar una casa"
     const radioButtons = await page.$$('input[type="radio"]');
     for (const radioButton of radioButtons) {
       const label = await radioButton.evaluateHandle(el => 
@@ -44,17 +50,9 @@ async function completarFormularioING() {
       }
     }
 
-    // Esperar un momento para asegurarnos de que la selección se registró
     await page.waitForTimeout(1000);
-
-    // Hacer clic en el botón "Continuar"
     await page.click('button:has-text("Continuar")');
-
-    // Esperar a que se cargue la siguiente página
     await page.waitForNavigation({ waitUntil: 'networkidle0' });
-
-    // Cerrar el navegador
-    await browser.close();
 
     return {
       success: true,
@@ -67,37 +65,11 @@ async function completarFormularioING() {
       success: false,
       error: error.message
     };
+  } finally {
+    if (browser) {
+      await browser.close();
+    }
   }
 }
 
-// Endpoint para el health check
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'OK' });
-});
-
-// Endpoint para completar el formulario
-app.post('/complete-form', async (req, res) => {
-  try {
-    const result = await completarFormularioING();
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// Manejador de errores general
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({
-    success: false,
-    error: 'Error interno del servidor'
-  });
-});
-
-// Iniciar el servidor
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-});
+// Resto del código igual...
